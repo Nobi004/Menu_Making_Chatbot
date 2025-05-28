@@ -4,7 +4,7 @@ from PIL import Image
 from io import BytesIO
 import docx 
 import os 
-
+from fitz import get_text, get_pixmap
 # Extracting text from .txt file
 def extract_text_from_text(file_bytes):        
     return file_bytes.decode("utf-8").strip()
@@ -43,7 +43,7 @@ def extract_text_from_pdf(file_bytes):
             page = doc.load_page(page_num)
             pix = page.get_pixmap()
             img = Image.frombytes("RGB",[pix.weight,pix.height],pix.samples)
-            ocr_text = pytesseract.image_to_string(img,lang="eng","duetsch")
+            ocr_text = pytesseract.image_to_string(img,lang="eng")
             text += ocr_text + "\n"
     return text.strip()
 
