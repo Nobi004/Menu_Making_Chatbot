@@ -3,3 +3,6 @@ pymupdf
 python-docx 
 pytesseract 
 pillow
+opneai
+# pyheif
+pillow-heif
