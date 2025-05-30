@@ -1,4 +1,4 @@
-import fitz ,
+import fitz 
 import pytesseract
 from PIL import Image
 from io import BytesIO
@@ -49,7 +49,7 @@ def extract_text_from_pdf(file_bytes):
 
     # Text-based pdf extraction
     for page in doc:
-        page_text = page.get_text()
+        page_text = page.get_text() # type: ignore
         if page_text.strip():
             text += page_text + "\n"
 
@@ -58,8 +58,8 @@ def extract_text_from_pdf(file_bytes):
         text = ""
         for page_num in range(len(doc)):
             page = doc.load_page(page_num)
-            pix = page.get_pixmap()
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            pix = page.get_pixmap() # type: ignore
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples) # type: ignore
             ocr_text = pytesseract.image_to_string(img, lang="eng")
             text += ocr_text + "\n"
     return text.strip()
@@ -82,7 +82,7 @@ def extract_text(file, filename=None):
     if filename:
         ext = os.path.splitext(filename)[1].lower()
     elif hasattr(file, "name"):
-        ext = os.path.splitext(file.name)[1].lower()
+        ext = os.path.splitext(file.name)[1].lower() # type: ignore
 
     # Heuristic based on extension or fallback on MIME/type if available
     if ext in [".pdf"]:

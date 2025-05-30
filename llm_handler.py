@@ -1,4 +1,4 @@
-from llm_clients.openai_cliant import OpenAIClient
+from llm_clients.openai_client import OpenAIClient
 
 LLM_PROVIDER = "openai"
 
@@ -12,4 +12,4 @@ def get_llm_client():
 
 def extract_menu_from_text(extracted_text):
     client = get_llm_client()
-    return client.extract_desired_output(extracted_text)
+    return client.extract_menu(extracted_text)
