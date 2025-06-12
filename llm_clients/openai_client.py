@@ -5,7 +5,7 @@ class OpenAIClient:
     from typing import Optional
 
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv("API")
+        self.api_key =os.getenv("API")
         if not self.api_key:
             raise ValueError("OpenAI API key is required")
         
