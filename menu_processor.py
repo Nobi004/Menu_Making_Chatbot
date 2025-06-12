@@ -10,71 +10,107 @@ class MenuProcessor:
         self.llm = get_llm_client(provider=llm_provider, api_key=api_key)
         
     def process_menu_file(self, file, filename: Optional[str] = None) -> List[Dict]:
-        """Process an uploaded menu file and extract structured data."""
-        if hasattr(file, 'read'):
-            # If file is file-like object (e.g. BytesIO, StreamIO)
-            content = file.read()
-            if isinstance(content, bytes):
-                raw_text = extract_text(content, filename=filename)
-            else:
-                raw_text = content.decode('utf-8')
-        else:
-            # If file is already bytes or string
-            raw_text = extract_text(file, filename=filename)
-
+        """Process menu file in chunks to handle large files"""
+        # Extract text
+        raw_text = extract_text(file, filename=filename)
         if not raw_text.strip():
             raise ValueError("No text could be extracted from the uploaded file.")
-    
-        # Build prompt and get LLM response
-        prompt = self._build_prompt(raw_text)
-        response_text = self.llm.generate_text(prompt=prompt)
         
-        # Parse response into structured data
-        items = self._parse_llm_response(response_text)
-        return items
+        # Split text into chunks if too long (approx 2000 chars per chunk)
+        chunks = [raw_text[i:i+2000] for i in range(0, len(raw_text), 2000)]
+        all_items = []
+        
+        # Process each chunk
+        for chunk in chunks:
+            try:
+                prompt = self._build_prompt(chunk)
+                response_text = self.llm.generate_text(prompt=prompt)
+                items = self._parse_llm_response(response_text)
+                all_items.extend(items)
+            except Exception as e:
+                st.warning(f"Warning: Some items might not be processed correctly: {str(e)}")
+                continue
+        
+        return all_items
     
     def _build_prompt(self, menu_text: str) -> str:
         prompt = f"""
-                You are a restaurant menu parser.
+        You are a restaurant menu parser.
 
-                Extract all food and beverage items from the following menu text.
-                For each item, provide the following fields:
-                - NAME: shorten to max 20 characters, remove filler words, keep main words
-                - QUANTITY: if available, else 1
-                - PRICE: in cents, no decimals or separators (e.g. 7.20 EUR -> 720)
-                - WARENGRUPPE: product group inferred from item or menu context
-                - HAUPTGRUPPE: 'KÜCHE' for food, 'THEKE' for beverages
-                - STEUERSATZ: 7 for food, 19 for beverages
-                - ORDERGRUPPE: 'KÜCHE WARM' for food, 'THEKE' for beverages
-                - AUSSER_HAUS: 1 for food, 0 for drinks
+        Extract all food and beverage items from the following menu text.
+        For each item, provide the following fields:
+        - NAME: shorten to max 20 characters, remove filler words, keep main words.
+          If multiple sizes or quantities are listed for the same item (e.g., 0.23L and 0.5L for Coca Cola),
+          create separate entries with the size as prefix in the name (e.g., "0.23L Coca Cola", "0.5L Coca Cola").
+        - QUANTITY: if available, else 1
+        - PRICE: in cents, no decimals or separators (e.g., 7.20 EUR -> 720)
+        - WARENGRUPPE: product group inferred from item or menu context
+        - HAUPTGRUPPE: 'KÜCHE' for food, 'THEKE' for beverages
+        - STEUERSATZ: 7 for food, 19 for beverages
+        - ORDERGRUPPE: 'KÜCHE WARM' for food, 'THEKE' for beverages
+        - AUSSER_HAUS: 1 for food, 0 for drinks
 
-                Output ONLY a JSON array of objects with these keys:
-                name, quantity, price, warengruppe, hauptgruppe, steuersatz, ordergruppe, ausser_haus
+        Additionally, correct any German grammatical mistakes in the item names and output data automatically.
 
-                Menu text:
-                \"\"\"
-                {menu_text}
-                \"\"\"
+        Output ONLY a JSON array of objects with these keys:
+        name, quantity, price, warengruppe, hauptgruppe, steuersatz, ordergruppe, ausser_haus
 
-                Please be concise and consistent.
-                """
+        Make sure ALL data from the menu is included — no item, size, or price should be missed.
+
+        Menu text:
+        \"\"\"
+        {menu_text}
+        \"\"\"
+
+        Please be concise and consistent with the output format.
+        """
         return prompt
+
+
+
     
     def _parse_llm_response(self, response_text: str) -> List[Dict]:
+        """Parse LLM response with improved error handling and JSON cleaning"""
         import json
         try:
-            # Clean common issues (like trailing commas)
-            cleaned = re.sub(r",\s*}", "}", response_text)
-            cleaned = re.sub(r",\s*]", "]", cleaned)
-
+            # Clean and normalize the response text
+            cleaned = response_text.strip()
+            
+            # Fix common JSON formatting issues
+            cleaned = re.sub(r',\s*}', '}', cleaned)  # Remove trailing commas in objects
+            cleaned = re.sub(r',\s*]', ']', cleaned)  # Remove trailing commas in arrays
+            cleaned = re.sub(r'}\s*{', '},{', cleaned)  # Fix missing commas between objects
+            
+            # Ensure the text starts with [ and ends with ]
+            if not cleaned.startswith('['):
+                cleaned = '[' + cleaned
+            if not cleaned.endswith(']'):
+                cleaned = cleaned + ']'
+            
+            # Handle truncated JSON
+            if '"' in cleaned and not cleaned.count('"') % 2 == 0:
+                # Find last complete object
+                last_complete = cleaned.rfind('}')+1
+                if last_complete > 0:
+                    cleaned = cleaned[:last_complete] + ']'
+            
             items = json.loads(cleaned)
             
             if not isinstance(items, list):
                 raise ValueError("LLM response is not a list")
+                
+            # Validate each item has required fields
+            required_fields = {'name', 'price', 'warengruppe', 'hauptgruppe', 'steuersatz', 'ordergruppe', 'ausser_haus'}
+            items = [item for item in items if all(field in item for field in required_fields)]
+            
             return items
-        except Exception as e:
-            raise RuntimeError(f"Failed to parse LLM response as JSON: {e}\nResponse:\n{response_text}")
         
+        except json.JSONDecodeError as e:
+            # More specific error message for JSON parsing issues
+            raise RuntimeError(f"JSON parsing error at position {e.pos}: {str(e)}\nResponse text:\n{response_text[:500]}...")
+        except Exception as e:
+            raise RuntimeError(f"Failed to parse LLM response: {str(e)}\nResponse text:\n{response_text[:500]}...")
+            
     def generate_csv(self, items: List[Dict], template_path: str) -> str:
         """
         Given a list of items, generate the CSV content as a string,
